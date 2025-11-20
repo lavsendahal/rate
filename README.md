@@ -1,4 +1,4 @@
-# Rad Text Engine (RaTE)
+# Radiology Text Engine (RATE)
 
 A Python-based engine for processing radiology reports using the Qwen3-30B-A3B-FP8 model with sglang for efficient batch inference. Includes quality control file generation and performance evaluation tools for comprehensive validation workflows with debug mode for faster iteration.
 
