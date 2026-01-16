@@ -10,7 +10,13 @@ from typing import Dict, List
 
 import pandas as pd
 
-from src.core.tri_state_rules import extract_merlin_30
+import sys
+
+# Allow running from repo root without installing the package.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from core.tri_state_rules import extract_merlin_30
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,4 +73,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

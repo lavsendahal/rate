@@ -180,9 +180,27 @@ def extract_merlin_30(text: str) -> Dict[str, Tuple[int, List[str]]]:
         "submucosal_edema": [r"\bsubmucosal edema\b", r"\benterocolitis\b", r"\bgastritis\b"],
         "aortic_valve_calcification": [r"\baortic (valve|valvular) calcif"],
         "thrombosis": [r"\bthrombosis\b", r"\bthrombus\b"],
-        "pancreatic_atrophy": [r"\bpancreatic atrophy\b", r"\batrophic pancreas\b"],
+        "pancreatic_atrophy": [
+            r"\bpancreatic atrophy\b",
+            r"\batrophic pancreas\b",
+            r"\bpancreas is atrophic\b",
+            r"\batrophy of (?:the )?pancreas\b",
+        ],
         "osteopenia": [r"\bosteopenia\b", r"\bdemineral(?:ized|ization)\b"],
-        "surgically_absent_gallbladder": [r"\bsurgically absent\b.*\bgallbladder\b", r"\bstatus post cholecystectomy\b"],
+        # Very high-precision concept; boost recall by supporting common variants of cholecystectomy language.
+        "surgically_absent_gallbladder": [
+            r"\bgallbladder\b.*\bsurgically absent\b",
+            r"\bsurgically absent\b.*\bgallbladder\b",
+            r"\bstatus post cholecystectomy\b",
+            r"\bstatus-post cholecystectomy\b",
+            r"\bpost\s*cholecystectomy\b",
+            r"\bpostcholecystectomy\b",
+            r"\bprior cholecystectomy\b",
+            r"\bhistory of cholecystectomy\b",
+            r"\bcholecystectomy\b",
+            r"\bgallbladder\s+(?:has been|is)\s+removed\b",
+            r"\babsent gallbladder\b",
+        ],
         "atelectasis": [r"\batelectasis\b"],
         "abdominal_aortic_aneurysm": [r"\babdominal aortic aneurysm\b", r"\baaa\b"],
         "anasarca": [r"\banasarca\b", r"\bdiffuse (?:subcutaneous )?edema\b"],
@@ -195,20 +213,34 @@ def extract_merlin_30(text: str) -> Dict[str, Tuple[int, List[str]]]:
         "hepatomegaly": [r"\bhepatomegaly\b"],
         "atherosclerosis": [r"\batherosclero"],
         "ascites": [r"\bascites\b"],
-        "pleural_effusion": [r"\bpleural effusion\b"],
+        # Effusion often appears as "small right effusion" in the thorax section; avoid pericardial effusion.
+        "pleural_effusion": [r"\bpleural effusion\b", r"\b(?:right|left|bilateral)\s+(?:pleural\s+)?effusion\b", r"\bsmall\s+(?:right|left)\s+effusion\b"],
         "hepatic_steatosis": [r"\bhepatic steatosis\b", r"\bfatty liver\b", r"\bfatty infiltration\b"],
         "appendicitis": [r"\bappendicitis\b"],
         "gallstones": [r"\bgallstones\b", r"\bcholelithiasis\b"],
         "bowel_obstruction": [r"\bbowel obstruction\b", r"\bsmall bowel obstruction\b", r"\bsbo\b"],
         "free_air": [r"\bfree air\b", r"\bpneumoperitoneum\b"],
-        "fracture": [r"\bfracture\b", r"\bcompression fracture\b", r"\brib fracture\b", r"\bvertebral.*fracture\b"],
+        "fracture": [
+            r"\bfracture\b",
+            r"\bcompression fracture\b",
+            r"\brib fracture\b",
+            r"\bvertebral(?: body)?\s+fracture\b",
+            r"\bpathologic fracture\b",
+            r"\bsubacute fracture\b",
+            r"\bacute fracture\b",
+            r"\bchronic fracture\b",
+        ],
     }
 
     for disease, pats in simple_patterns.items():
-        label, ev = _classify_mentions(
-            cleaned,
-            [re.compile(p, re.IGNORECASE) for p in pats],
-        )
+        forbid = []
+        require = []
+        # Pleural effusion: exclude pericardial-only effusions and require thoracic context if effusion is generic.
+        if disease == "pleural_effusion":
+            forbid = [re.compile(r"\bpericardial effusion\b", re.IGNORECASE)]
+            # If "pleural" isn't present, require typical thoracic context words.
+            require = []
+        label, ev = _classify_mentions(cleaned, [re.compile(p, re.IGNORECASE) for p in pats], forbid_any=forbid, require_all=require)
         compiled[disease] = (int(label), [e.text for e in ev])
 
     # --- coronary_calcification (requires coronary + calcification) ---
@@ -221,6 +253,7 @@ def extract_merlin_30(text: str) -> Dict[str, Tuple[int, List[str]]]:
     compiled["coronary_calcification"] = (int(coronary_label), [e.text for e in coronary_ev])
 
     # --- renal cyst vs renal hypodensities gating ---
+    renal_context = re.compile(r"\b(renal|kidney|kidneys)\b", re.IGNORECASE)
     renal_cyst_label, renal_cyst_ev = _classify_mentions(
         cleaned,
         [
@@ -234,31 +267,50 @@ def extract_merlin_30(text: str) -> Dict[str, Tuple[int, List[str]]]:
             re.compile(r"\bconsistent with\b.*\bcysts?\b", re.IGNORECASE),
         ],
     )
+    # Tighten: ensure the evidence is renal-context; drop generic "consistent with cysts" in non-renal contexts.
+    renal_cyst_evidence = [e.text for e in renal_cyst_ev if renal_context.search(e.text)]
+    if renal_cyst_label == TriLabel.PRESENT and not renal_cyst_evidence:
+        renal_cyst_label = TriLabel.ABSENT
+        renal_cyst_ev = []
+    else:
+        renal_cyst_ev = [Evidence(t, "present") for t in renal_cyst_evidence] if renal_cyst_evidence else renal_cyst_ev
     compiled["renal_cyst"] = (int(renal_cyst_label), [e.text for e in renal_cyst_ev])
 
-    # Renal hypodensities: only count if not characterized as cyst
-    hypodensity_mentions = [
-        re.compile(r"\b(hypodens(?:e|ity|ities)|renal (?:mass|lesion)|renal (?:hypodense )?lesion)\b", re.IGNORECASE),
-    ]
-    hypodensity_label, hypodensity_ev = _classify_mentions(
-        cleaned,
-        hypodensity_mentions,
-        special_uncertain_phrases=[
-            re.compile(r"\btoo small to characterize\b", re.IGNORECASE),
-            re.compile(r"\bindeterminate\b", re.IGNORECASE),
-        ],
-        forbid_any=[
-            re.compile(r"\blikely\b.*\bcysts?\b", re.IGNORECASE),
-            re.compile(r"\bsimple cyst", re.IGNORECASE),
-            re.compile(r"\bconsistent with\b.*\bcysts?\b", re.IGNORECASE),
-        ],
-    )
-    # Cross-label gating: if cyst is present and hypodensity only explained as cysts, force hypodensities absent.
-    if compiled["renal_cyst"][0] == int(TriLabel.PRESENT) and hypodensity_label != TriLabel.PRESENT:
-        # If we didn't find a non-cystic renal hypodensity, keep it absent.
-        hypodensity_label = TriLabel.ABSENT
-        hypodensity_ev = []
-    compiled["renal_hypodensities"] = (int(hypodensity_label), [e.text for e in hypodensity_ev])
+    # Renal hypodensities: dataset policy = indeterminate/non-cystic renal hypodensity.
+    # If hypodensity is interpreted as cyst -> renal_cyst=1, renal_hypodensities=0.
+    hypodensity_sentence_re = re.compile(r"\b(hypodens(?:e|ity|ities)|hypodense lesions?|renal (?:mass|masses|lesion|lesions))\b", re.IGNORECASE)
+    non_cystic_cues = re.compile(r"\b(indeterminate|solid|enhanc|mass|suspicious|neoplasm|malignan)\b", re.IGNORECASE)
+    cyst_cues = re.compile(r"\b(cyst|cysts|simple)\b", re.IGNORECASE)
+    tstc_cues = re.compile(r"\btoo small to characterize\b|\btstc\b", re.IGNORECASE)
+
+    present_ev: List[str] = []
+    uncertain_ev: List[str] = []
+
+    for sent in _sentences(cleaned):
+        if not renal_context.search(sent):
+            continue
+        if not hypodensity_sentence_re.search(sent):
+            continue
+        if _is_negated(sent, hypodensity_sentence_re.search(sent).start()):  # type: ignore[union-attr]
+            continue
+        # If the sentence itself calls them cysts, this is not renal_hypodensities.
+        if cyst_cues.search(sent) and not non_cystic_cues.search(sent):
+            continue
+        if non_cystic_cues.search(sent):
+            if _is_uncertain(sent) or tstc_cues.search(sent):
+                uncertain_ev.append(sent)
+            else:
+                present_ev.append(sent)
+            continue
+        if tstc_cues.search(sent):
+            uncertain_ev.append(sent)
+
+    if present_ev:
+        compiled["renal_hypodensities"] = (int(TriLabel.PRESENT), _dedupe(present_ev))
+    elif uncertain_ev and compiled["renal_cyst"][0] != int(TriLabel.PRESENT):
+        compiled["renal_hypodensities"] = (int(TriLabel.UNCERTAIN), _dedupe(uncertain_ev))
+    else:
+        compiled["renal_hypodensities"] = (int(TriLabel.ABSENT), [])
 
     # --- hydronephrosis (include synonyms; treat mild prominence as uncertain) ---
     hydronephrosis_label, hydronephrosis_ev = _classify_mentions(
@@ -273,6 +325,7 @@ def extract_merlin_30(text: str) -> Dict[str, Tuple[int, List[str]]]:
         ],
         special_uncertain_phrases=[
             re.compile(r"\bmild prominence of (?:the )?collecting system\b", re.IGNORECASE),
+            re.compile(r"\bmild (?:right|left|bilateral)?\s*(?:pelviectasis|pyelectasis)\b", re.IGNORECASE),
         ],
     )
     compiled["hydronephrosis"] = (int(hydronephrosis_label), [e.text for e in hydronephrosis_ev])
@@ -291,4 +344,3 @@ def extract_merlin_30(text: str) -> Dict[str, Tuple[int, List[str]]]:
     compiled["metastatic_disease"] = (int(metastatic_label), [e.text for e in metastatic_ev])
 
     return compiled
-
