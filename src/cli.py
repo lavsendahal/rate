@@ -241,8 +241,14 @@ def main():
         reports = load_reports_from_files(args.input_files, args.accession_col, args.report_col, config_dict.get('debug'))
         print(f"Loaded {len(reports)} total reports")
 
-    # Merge with default config
-    config.update(config_dict)
+    # Merge with default config.
+    # Important: do a shallow merge for top-level keys, but merge nested dicts (e.g., `processing`)
+    # so user-provided settings in `config/default_config.yaml` (like `max_concurrency`) are preserved.
+    for key, value in config_dict.items():
+        if isinstance(value, dict) and isinstance(config.get(key), dict):
+            config[key].update(value)
+        else:
+            config[key] = value
     
     # Set debug logging if requested
     if args.debug:

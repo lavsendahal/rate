@@ -110,6 +110,25 @@ python src/cli.py \
     --save-dir results
 ```
 
+### Rule-Based Tri-State Labels (Merlin 30)
+
+If you want a fast, fully local, non-LLM baseline that outputs tri-state labels per report:
+
+- `1` = present (requires explicit evidence text)
+- `0` = absent
+- `-1` = uncertain/equivocal/limited evaluation
+
+This writes `evidence_<disease>` columns with the exact sentence snippets that triggered each label.
+
+```bash
+python scripts/merlin_tri_state_extract.py \
+  --input-csv /scratch/railabs/ld258/temp/reports_final_merlin_test_set.csv \
+  --id-col "study id" \
+  --text-col "Findings" \
+  --out-csv merlin_tri_state_labels.csv \
+  --out-json merlin_tri_state_labels.json
+```
+
 **Debug mode for rapid iteration:**
 ```bash
 python src/cli.py \
