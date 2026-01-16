@@ -129,6 +129,23 @@ python scripts/merlin_tri_state_extract.py \
   --out-json merlin_tri_state_labels.json
 ```
 
+### LLM + Rule-Enforced Tri-State Labels (Merlin 30)
+
+If you want the LLM to output tri-state labels (`1/0/-1`) with evidence quotes and then enforce anti-hallucination rules
+(e.g., label `1` requires evidence quotes that appear in the text, renal cyst vs hypodensity gating, coronary calcification constraints),
+use:
+
+```bash
+python scripts/merlin_llm_tri_state_extract.py \
+  --input-csv /scratch/railabs/ld258/temp/reports_final_merlin_test_set.csv \
+  --id-col "study id" \
+  --text-col "Findings" \
+  --config config/default_config.yaml \
+  --max-concurrency 32 \
+  --out-csv merlin_llm_tri_state_labels.csv \
+  --out-json merlin_llm_tri_state_labels.json
+```
+
 **Debug mode for rapid iteration:**
 ```bash
 python src/cli.py \
