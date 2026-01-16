@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from core.llm_tri_state import build_merlin_prompt, parse_merlin_llm_output  # noqa: E402
 from core.merlin_diseases import MERLIN_DISEASES  # noqa: E402
+from core.text_cleaning import extract_findings_impression, remove_history_indication_blocks  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -108,7 +109,8 @@ def main() -> int:
         pending_rows = []
 
     def run_one(report_id: str, findings: str) -> Tuple[str, Dict[str, Any]]:
-        prompt = build_merlin_prompt(findings)
+        eligible_text = remove_history_indication_blocks(extract_findings_impression(findings))
+        prompt = build_merlin_prompt(eligible_text)
         req_payload = {
             "model": model,
             "messages": [
@@ -121,7 +123,7 @@ def main() -> int:
         }
         resp = post_chat(base_url, req_payload, args.request_timeout_s)
         content = get_content(resp)
-        parsed = parse_merlin_llm_output(findings, content)
+        parsed = parse_merlin_llm_output(eligible_text, content)
 
         out_row: Dict[str, Any] = {"report_id": report_id}
         for d in MERLIN_DISEASES:

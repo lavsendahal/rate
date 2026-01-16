@@ -17,6 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from core.tri_state_rules import extract_merlin_30
+from core.text_cleaning import extract_findings_impression, remove_history_indication_blocks
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,7 +46,8 @@ def main() -> int:
     for _, row in df.iterrows():
         report_id = str(row[args.id_col])
         text = "" if pd.isna(row[args.text_col]) else str(row[args.text_col])
-        disease_map = extract_merlin_30(text)
+        eligible_text = remove_history_indication_blocks(extract_findings_impression(text))
+        disease_map = extract_merlin_30(eligible_text)
 
         out_row: Dict[str, object] = {"report_id": report_id}
         for disease, (label, evidence_list) in disease_map.items():

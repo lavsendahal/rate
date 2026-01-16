@@ -120,6 +120,10 @@ If you want a fast, fully local, non-LLM baseline that outputs tri-state labels 
 
 This writes `evidence_<disease>` columns with the exact sentence snippets that triggered each label.
 
+Real-world note: if your text column contains mixed sections (Technique/Indication/Comparison + Findings + Impression),
+the scripts automatically keep the `Findings:` section (and everything after it, including `Impression:`) and ignore
+History/Indication blocks when they appear as headed sections.
+
 ```bash
 python scripts/merlin_tri_state_extract.py \
   --input-csv /scratch/railabs/ld258/temp/reports_final_merlin_test_set.csv \

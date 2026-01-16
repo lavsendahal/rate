@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from .merlin_diseases import DISEASE_TO_QUESTION, MERLIN_DISEASES
+from .text_cleaning import extract_findings_impression, remove_history_indication_blocks
 from .tri_state_rules import TriLabel, extract_merlin_30
 
 
@@ -80,6 +81,9 @@ def enforce_merlin_constraints(
     findings_text: str, labels: Dict[str, int], evidence: Dict[str, List[str]]
 ) -> Tuple[Dict[str, int], Dict[str, List[str]]]:
     """Enforce non-hallucination and cross-label gating rules on LLM output."""
+    # Enforce on the same eligible evidence region we prompt over.
+    eligible_text = remove_history_indication_blocks(extract_findings_impression(findings_text))
+
     out_labels = {k: int(labels.get(k, 0)) for k in MERLIN_DISEASES}
     out_evidence: Dict[str, List[str]] = {k: list(evidence.get(k, [])) for k in MERLIN_DISEASES}
 
@@ -87,7 +91,7 @@ def enforce_merlin_constraints(
     for d in MERLIN_DISEASES:
         if out_labels[d] != 1:
             continue
-        valid_quotes = [q for q in out_evidence[d] if _evidence_in_text(q, findings_text)]
+        valid_quotes = [q for q in out_evidence[d] if _evidence_in_text(q, eligible_text)]
         if not valid_quotes:
             out_labels[d] = int(TriLabel.UNCERTAIN)
             out_evidence[d] = []
@@ -96,7 +100,7 @@ def enforce_merlin_constraints(
 
     # 2) coronary_calcification: require 'coronary' + 'calcif' in evidence (or in text as backup).
     if out_labels["coronary_calcification"] == 1:
-        joined = " ".join(out_evidence["coronary_calcification"]) or findings_text
+        joined = " ".join(out_evidence["coronary_calcification"]) or eligible_text
         if not (re.search(r"\bcoronary\b", joined, re.IGNORECASE) and re.search(r"\bcalcif", joined, re.IGNORECASE)):
             out_labels["coronary_calcification"] = int(TriLabel.UNCERTAIN)
             out_evidence["coronary_calcification"] = []
