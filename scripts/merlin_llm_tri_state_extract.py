@@ -15,6 +15,8 @@ import pandas as pd
 import yaml
 from urllib.request import Request, urlopen
 
+from tqdm import tqdm
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -33,6 +35,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", default="config/default_config.yaml", help="Path to default_config.yaml")
     p.add_argument("--max-concurrency", type=int, default=32, help="HTTP request concurrency")
     p.add_argument("--request-timeout-s", type=int, default=180)
+    p.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=500,
+        help="Write partial outputs every N completed reports (default: 500)",
+    )
     return p.parse_args()
 
 
@@ -78,8 +86,26 @@ def main() -> int:
     if args.id_col not in df.columns or args.text_col not in df.columns:
         raise SystemExit(f"Missing required columns. Have: {df.columns.tolist()}")
 
-    rows: List[Dict[str, Any]] = []
+    out_csv = Path(args.out_csv)
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    out_json = Path(args.out_json) if args.out_json else None
+    if out_json is not None:
+        out_json.parent.mkdir(parents=True, exist_ok=True)
+        out_jsonl = out_json.with_suffix(out_json.suffix + ".jsonl")
+    else:
+        out_jsonl = None
+
+    pending_rows: List[Dict[str, Any]] = []
     json_out: Dict[str, Any] = {}
+    completed = 0
+
+    def flush_rows() -> None:
+        nonlocal pending_rows
+        if not pending_rows:
+            return
+        write_header = not out_csv.exists() or out_csv.stat().st_size == 0
+        pd.DataFrame(pending_rows).to_csv(out_csv, mode="a", header=write_header, index=False)
+        pending_rows = []
 
     def run_one(report_id: str, findings: str) -> Tuple[str, Dict[str, Any]]:
         prompt = build_merlin_prompt(findings)
@@ -119,25 +145,36 @@ def main() -> int:
             txt = "" if pd.isna(r[args.text_col]) else str(r[args.text_col])
             futs.append(ex.submit(run_one, rid, txt))
 
-        for fut in as_completed(futs):
-            rid, out = fut.result()
-            rows.append(out["row"])
-            json_out[rid] = out["debug"]
+        try:
+            for fut in tqdm(as_completed(futs), total=len(futs), desc="LLM tri-state", unit="report"):
+                try:
+                    rid, out = fut.result()
+                except Exception as e:
+                    print(f"[WARN] failed one report: {e}", flush=True)
+                    continue
 
-    out_csv = Path(args.out_csv)
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).sort_values("report_id").to_csv(out_csv, index=False)
-    print(f"Wrote: {out_csv}")
+                pending_rows.append(out["row"])
+                json_out[rid] = out["debug"]
 
-    if args.out_json:
-        out_json = Path(args.out_json)
-        out_json.parent.mkdir(parents=True, exist_ok=True)
+                if out_jsonl is not None:
+                    with open(out_jsonl, "a", encoding="utf-8") as f:
+                        f.write(json.dumps({rid: out["debug"]}) + "\n")
+
+                completed += 1
+                if args.checkpoint_every > 0 and completed % args.checkpoint_every == 0:
+                    flush_rows()
+        finally:
+            flush_rows()
+
+    print(f"Wrote CSV (incremental): {out_csv}")
+
+    if out_json is not None:
         out_json.write_text(json.dumps(json_out, indent=2))
-        print(f"Wrote: {out_json}")
+        print(f"Wrote JSON (final): {out_json}")
+        print(f"Wrote JSONL (incremental): {out_jsonl}")
 
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

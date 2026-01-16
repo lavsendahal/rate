@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Dict, Iterable, List, Sequence, Tuple
 
+from .text_cleaning import extract_findings_impression, remove_history_indication_blocks
 
 class TriLabel(IntEnum):
     ABSENT = 0
@@ -171,7 +172,10 @@ def _dedupe(items: List[str], limit: int = 3) -> List[str]:
 
 def extract_merlin_30(text: str) -> Dict[str, Tuple[int, List[str]]]:
     """Return {disease: (label, evidence_strings)} for Merlin 30 disease set."""
-    cleaned = _strip_history_blocks(text or "")
+    # Many real-world exports embed Technique/Indication/Comparison before Findings/Impression.
+    # Keep Findings(+Impression) and ignore history/indication.
+    sectioned = extract_findings_impression(text or "")
+    cleaned = remove_history_indication_blocks(_strip_history_blocks(sectioned))
 
     compiled: Dict[str, Tuple[int, List[str]]] = {}
 
